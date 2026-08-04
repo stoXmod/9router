@@ -84,7 +84,13 @@ const LOCAL_ONLY_PATHS = [
   "/api/headroom/proxy",
 ];
 
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+let LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
+const CUSTOM_LOOPBACK_HOSTNAME = process.env.CUSTOM_LOOPBACK_HOSTNAME;
+
+if(CUSTOM_LOOPBACK_HOSTNAME) {
+  LOOPBACK_HOSTS.add(CUSTOM_LOOPBACK_HOSTNAME.toLowerCase());
+}
 
 function isLoopbackHostname(h) {
   if (!h) return false;

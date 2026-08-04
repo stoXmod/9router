@@ -276,4 +276,42 @@ describe("dashboard guard helpers", () => {
 
     expect(__test__.extractApiKey(apiRequest)).toBe("header-key");
   });
+
+  describe('can access LOCAL_ONLY_PATHS with custom loopback host', () => {
+    it('allows local-only route with custom loopback hostname', async () => {
+      vi.stubEnv('CUSTOM_LOOPBACK_HOSTNAME', '9Router.Local');
+      vi.resetModules();
+      
+      const { proxy } = await import("../../src/dashboardGuard.js");
+      mocks.getSettings.mockResolvedValue({ requireLogin: false });
+
+      const response = await proxy(request("/api/cli-tools/antigravity-mitm", {
+        host: "9router.local:20128",
+        origin: "http://9router.local:20128",
+      }));
+
+      expect(response).toBe(mocks.nextResponse);
+
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    });
+
+    it('allows tunnel enable route with custom loopback hostname', async () => {
+      vi.stubEnv('CUSTOM_LOOPBACK_HOSTNAME', '9Router.Local');
+      vi.resetModules();
+      
+      const { proxy } = await import("../../src/dashboardGuard.js");
+      mocks.getSettings.mockResolvedValue({ requireLogin: false });
+
+      const response = await proxy(request("/api/tunnel/enable", {
+        host: "9router.local:20128",
+        origin: "http://9router.local:20128",
+      }));
+
+      expect(response).toBe(mocks.nextResponse);
+
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    });
+  });
 });
