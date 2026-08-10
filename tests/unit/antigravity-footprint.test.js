@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import os from "os";
 import { AntigravityExecutor } from "../../open-sse/executors/antigravity.js";
-import { ANTIGRAVITY_IDE_USER_AGENT } from "../../open-sse/providers/shared.js";
+import { ANTIGRAVITY_IDE_USER_AGENT, ANTIGRAVITY_IDE_VERSION } from "../../open-sse/providers/shared.js";
 import { getPlatformEnum, PLATFORM } from "../../open-sse/config/appConstants.js";
 import { getOAuthClientMetadata } from "../../src/lib/oauth/constants/oauth.js";
 
@@ -20,7 +20,7 @@ describe("Antigravity Static Footprint", () => {
     const headers = executor.buildHeaders({ accessToken: "fake-token" });
     
     expect(headers["User-Agent"]).toBe(ANTIGRAVITY_IDE_USER_AGENT);
-    expect(headers["User-Agent"]).toBe("antigravity/ide/2.1.1 darwin/arm64");
+    expect(headers["User-Agent"]).toBe(`antigravity/ide/${ANTIGRAVITY_IDE_VERSION} darwin/arm64`);
     
     const clientMetadata = JSON.parse(headers["Client-Metadata"]);
     expect(clientMetadata.platform).toBe(PLATFORM.DARWIN_ARM64);
@@ -40,7 +40,7 @@ describe("Cross-Environment Simulation", () => {
     const executor = new AntigravityExecutor();
     const headers = executor.buildHeaders({ accessToken: "fake-token" });
     
-    expect(headers["User-Agent"]).toBe("antigravity/ide/2.1.1 darwin/arm64");
+    expect(headers["User-Agent"]).toBe(`antigravity/ide/${ANTIGRAVITY_IDE_VERSION} darwin/arm64`);
     
     const clientMetadata = JSON.parse(headers["Client-Metadata"]);
     expect(clientMetadata.platform).toBe(PLATFORM.DARWIN_ARM64);
@@ -58,7 +58,7 @@ describe("Cross-Environment Simulation", () => {
     const executor = new AntigravityExecutor();
     const headers = executor.buildHeaders({ accessToken: "fake-token" });
     
-    expect(headers["User-Agent"]).toBe("antigravity/ide/2.1.1 darwin/arm64");
+    expect(headers["User-Agent"]).toBe(`antigravity/ide/${ANTIGRAVITY_IDE_VERSION} darwin/arm64`);
     
     const clientMetadata = JSON.parse(headers["Client-Metadata"]);
     expect(clientMetadata.platform).toBe(PLATFORM.DARWIN_ARM64);

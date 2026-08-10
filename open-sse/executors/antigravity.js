@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { BaseExecutor } from "./base.js";
 import { PROVIDERS } from "../config/providers.js";
 import { OAUTH_ENDPOINTS, ANTIGRAVITY_HEADERS, AG_DEFAULT_TOOLS, AG_TOOL_SUFFIX, getPlatformEnum } from "../config/appConstants.js";
+import { ANTIGRAVITY_IDE_VERSION } from "../providers/shared.js";
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
@@ -133,7 +134,7 @@ export class AntigravityExecutor extends BaseExecutor {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${credentials.accessToken}`,
       "User-Agent": this.config.headers?.["User-Agent"] || ANTIGRAVITY_HEADERS["User-Agent"],
-      "X-Goog-Api-Client": "gl-node/24.14.0 fire/2.1.1",
+      "X-Goog-Api-Client": `gl-node/24.14.0 fire/${ANTIGRAVITY_IDE_VERSION}`,
       "Client-Metadata": clientMetadata,
       "x-request-source": "local",
       "Accept": stream ? "text/event-stream" : "application/json"
