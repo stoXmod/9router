@@ -1,6 +1,6 @@
 import { platform, arch, hostname } from "os";
 import { PROVIDERS, PROVIDER_OAUTH } from "./providers.js";
-import { ANTIGRAVITY_IDE_VERSION } from "../providers/shared.js";
+import { ANTIGRAVITY_IDE_VERSION, ANTIGRAVITY_IDE_USER_AGENT } from "../providers/shared.js";
 import { createRequire } from "module";
 
 // === Gemini CLI === derive từ registry gemini-cli.transport
@@ -60,21 +60,8 @@ export function getPlatformEnum() {
   return PLATFORM.UNSPECIFIED;
 }
 
-// Map Node.js os identifiers to the format used by the real Antigravity IDE
-function getIdePlatform() {
-  const p = platform();
-  if (p === "win32") return "windows";
-  if (p === "darwin") return "darwin";
-  return p; // linux, etc.
-}
-function getIdeArch() {
-  const a = arch();
-  if (a === "x64") return "amd64";
-  return a; // arm64, etc.
-}
-
 export function getPlatformUserAgent() {
-  return `antigravity/ide/${ANTIGRAVITY_IDE_VERSION} ${getIdePlatform()}/${getIdeArch()}`;
+  return ANTIGRAVITY_IDE_USER_AGENT;
 }
 
 export const CLIENT_METADATA = {
@@ -142,9 +129,12 @@ export const AG_DEFAULT_TOOLS = new Set([
   "write_to_file"
 ]);
 
-// Antigravity chat/stream headers — must match real IDE fingerprint
+// Antigravity chat/stream headers — hardcoded darwin/arm64 to match captured IDE
+// fingerprint consistently across onboarding (loadCodeAssist) and chat requests.
+// getPlatformUserAgent() on a Linux VPS would return linux/amd64, creating a
+// split identity that Google detects and penalises with faster quota exhaustion.
 export const ANTIGRAVITY_HEADERS = {
-  "User-Agent": getPlatformUserAgent()
+  "User-Agent": ANTIGRAVITY_IDE_USER_AGENT
 };
 
 // Cloud Code Assist API endpoints differ by client ecosystem.
@@ -164,7 +154,7 @@ export const CLOUD_CODE_API = {
 
 export const LOAD_CODE_ASSIST_HEADERS = {
   "Content-Type": "application/json",
-  "User-Agent": getPlatformUserAgent(),
+  "User-Agent": ANTIGRAVITY_IDE_USER_AGENT,
 };
 
 export const LOAD_CODE_ASSIST_METADATA = {
