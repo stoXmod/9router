@@ -113,6 +113,7 @@ function buildIdeRequestId({ body, request, credentials, model, requestType }) {
 export class AntigravityExecutor extends BaseExecutor {
   constructor() {
     super("antigravity", PROVIDERS.antigravity);
+    this._lastSessionId = null;
   }
 
   // Parse Antigravity quota error to extract precise resetsAtMs from ErrorInfo/RetryInfo
@@ -162,10 +163,16 @@ export class AntigravityExecutor extends BaseExecutor {
   // sessionId comes from transformRequest output; base.execute runs transformRequest before
   // buildHeaders, so we read it from instance state cached there (fallback: explicit arg).
   buildHeaders(credentials, stream = true, sessionId = null) {
+    const platformEnum = getPlatformEnum();
+    const clientMetadata = JSON.stringify({ ideType: 9, platform: platformEnum, pluginType: 2 });
     return {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${credentials.accessToken}`,
       "User-Agent": this.config.headers?.["User-Agent"] || ANTIGRAVITY_HEADERS["User-Agent"],
+      "X-Goog-Api-Client": "gl-node/24.14.0 fire/2.1.1",
+      "Client-Metadata": clientMetadata,
+      "x-request-source": "local",
+      "Accept": stream ? "text/event-stream" : "application/json"
     };
   }
 
