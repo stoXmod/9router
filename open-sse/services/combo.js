@@ -82,6 +82,56 @@ export function reorderByCapabilities(models, required) {
 }
 
 /**
+ * Reorder combo models so the model chosen for a complexity tier leads.
+ *
+ * Pure + network-free (unit-testable). The rest of the combo keeps its existing
+ * order as the fallback ladder, so the availability/quota path is untouched — we
+ * only change which model is tried FIRST.
+ *
+ * tierMap is an explicit per-combo policy: { SIMPLE, MEDIUM, COMPLEX, REASONING }
+ * → model string (see config/jev.js). Resolution:
+ *   - candidate already in models → stable-move to front (rest keep order);
+ *   - candidate is a new model string → prepend it (primary), rest stay as fallback;
+ *   - no candidate for the tier → models unchanged (fail-open).
+ *
+ * Capability auto-switch (reorderByCapabilities) runs AFTER this in handleComboChat,
+ * so a hard capability (vision/pdf) still outranks a tier preference — correct
+ * precedence, since picking a non-vision model would drop image data.
+ *
+ * @param {string[]} models - combo models (ordered fallback chain)
+ * @param {string} tier - one of JEV_TIERS
+ * @param {Record<string,string>} [tierMap] - tier → model policy
+ * @returns {string[]} reordered models (never drops a model)
+ */
+export function inferSmartTierMap(models) {
+  if (!Array.isArray(models) || models.length === 0) return {};
+  const last = models.length - 1;
+  return {
+    REASONING: models[0],
+    COMPLEX: models[0],
+    MEDIUM: models[Math.ceil(last / 2)],
+    SIMPLE: models[last],
+  };
+}
+
+export function reorderModelsForTier(models, tier, tierMap) {
+  if (!Array.isArray(models) || models.length === 0 || !tier) return models;
+  const effectiveMap = tierMap && Object.keys(tierMap).length > 0
+    ? tierMap
+    : inferSmartTierMap(models);
+  const candidate = effectiveMap[tier];
+  if (typeof candidate !== "string" || !candidate.trim()) return models;
+
+  const idx = models.indexOf(candidate);
+  if (idx === 0) return models;                 // already leads
+  if (idx > 0) {                                // stable-move to front
+    const rest = models.filter((_, i) => i !== idx);
+    return [candidate, ...rest];
+  }
+  return [candidate, ...models];                // new primary, rest as fallback
+}
+
+/**
  * Track rotation state per combo (for round-robin strategy)
  * @type {Map<string, { index: number, consecutiveUseCount: number }>}
  */
@@ -91,7 +141,7 @@ const comboRotationState = new Map();
 // turn. It may span several messages (e.g. text + image split across blocks),
 // so we return all of them. History media (older turns) must not pin the combo
 // to a vision model — those get stripped + placeholdered downstream instead.
-function trailingUserItems(arr) {
+export function trailingUserItems(arr) {
   if (!Array.isArray(arr) || arr.length === 0) return [];
   const isAssistant = (r) => r === "assistant" || r === "model";
   let i = arr.length - 1;
@@ -138,8 +188,42 @@ export function detectRequiredCapabilities(body) {
     if (Array.isArray(content)) for (const b of content) scanBlock(b);
   };
 
+  const scanMessage = (m) => {
+    if (!m || typeof m !== "object") return;
+
+    // Ollama / Hermes images array (strings or objects)
+    if (Array.isArray(m.images) && m.images.length > 0) {
+      required.add("vision");
+    }
+
+    // Vercel AI SDK / Hermes attachments / experimental_attachments
+    const attachments = m.experimental_attachments || m.attachments;
+    if (Array.isArray(attachments)) {
+      for (const att of attachments) {
+        if (!att) continue;
+        const mime = att.contentType || att.mediaType || (typeof att.url === "string" && att.url.match(/^data:([^;,]+)/)?.[1]);
+        if (mime) addByMime(mime);
+        else if (att.url || att.data) required.add("vision");
+      }
+    }
+
+    // Direct message-level modality properties
+    if (m.image_url || m.image) required.add("vision");
+    if (m.audio_url || m.audio) required.add("audioInput");
+
+    // Scan array content blocks
+    scanContent(m.content);
+
+    // Scan string content for embedded data URIs
+    if (typeof m.content === "string") {
+      if (m.content.includes("data:image/")) required.add("vision");
+      else if (m.content.includes("data:audio/")) required.add("audioInput");
+      else if (m.content.includes("data:application/pdf")) required.add("pdf");
+    }
+  };
+
   // Modalities: current user turn only (trailing user run across each known shape).
-  for (const m of trailingUserItems(body.messages)) scanContent(m.content);      // openai / claude
+  for (const m of trailingUserItems(body.messages)) scanMessage(m);              // openai / claude / hermes / ollama
   for (const it of trailingUserItems(body.input)) scanContent(it.content);       // responses
   const contents = body.contents || body.request?.contents;                      // gemini / antigravity
   for (const c of trailingUserItems(contents)) scanContent(c.parts);
@@ -232,6 +316,46 @@ export function getComboModelsFromData(modelStr, combosData) {
 }
 
 /**
+ * Detect whether a 2xx JSON response contains zero usable content
+ * (e.g. empty assistant message with in_progress/incomplete)
+ * so combo fallback can continue to the next model.
+ */
+export function isZeroContentResponse(data) {
+  if (!data || typeof data !== "object") return false;
+
+  // OpenAI chat format
+  if (Array.isArray(data.choices)) {
+    if (data.choices.length === 0) return true;
+    const choice = data.choices[0];
+    if (!choice) return true;
+
+    const msg = choice.message || choice.delta;
+    const content = msg?.content;
+    const hasContent = typeof content === "string" ? content.trim().length > 0 : (Array.isArray(content) && content.length > 0);
+    const hasToolCalls = (Array.isArray(msg?.tool_calls) && msg.tool_calls.length > 0) || Boolean(msg?.function_call);
+    const hasReasoning = typeof msg?.reasoning_content === "string" ? msg.reasoning_content.trim().length > 0 : false;
+
+    const finish = choice.finish_reason;
+    const isNormalFinish = finish === "stop" || finish === "length" || finish === "tool_calls" || finish === "function_call";
+
+    if (!hasContent && !hasToolCalls && !hasReasoning && (!isNormalFinish || finish === "in_progress" || finish === "incomplete")) {
+      return true;
+    }
+  }
+
+  // Anthropic messages format
+  if (Array.isArray(data.content)) {
+    const hasContent = data.content.some((c) => (c.type === "text" && c.text?.trim().length > 0) || c.type === "tool_use");
+    const stopReason = data.stop_reason;
+    if (!hasContent && (!stopReason || stopReason === "in_progress" || stopReason === "incomplete")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Handle combo chat with fallback
  * @param {Object} options
  * @param {Object} options.body - Request body
@@ -270,8 +394,26 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
     try {
       const result = await handleSingleModel(body, modelStr);
       
-      // Success (2xx) - return response
+      // Success (2xx) - return response unless empty/zero-content on a non-final seat
       if (result.ok) {
+        const isLastModel = i === rotatedModels.length - 1;
+        if (!isLastModel) {
+          const contentType = result.headers?.get?.("content-type") || "";
+          if (contentType.includes("application/json")) {
+            try {
+              const peekBody = await result.clone().json();
+              if (isZeroContentResponse(peekBody)) {
+                log.warn("COMBO", `Model ${modelStr} returned HTTP 200 with zero usable content, falling back to next model`);
+                lastError = "Zero usable content";
+                lastStatus = 200;
+                continue;
+              }
+            } catch {
+              // Ignore JSON parse errors
+            }
+          }
+        }
+
         log.info("COMBO", `Model ${modelStr} succeeded`);
         return result;
       }
@@ -530,7 +672,10 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
   log.info("FUSION", `Combo "${comboName}" | panel=${panel.length} [${panel.join(", ")}] | judge=${judge} | quorum=${minPanel}`);
 
   // 1. Fan out to the panel in parallel: non-streaming, tools stripped (we want prose).
-  const { tools, tool_choice, ...rest } = body;
+  const { tools, tool_choice, stream_options, ...rest } = body;
+  // Fusion runs panel models non-streaming; drop stream_options too, or providers
+  // like DeepSeek reject it with "stream_options should be set along with stream = true".
+  // See issue #3024.
   const panelBody = { ...rest, stream: false };
 
   // Flatten tool turns to prose so panel models keep context without emitting tool_calls.
